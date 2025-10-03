@@ -39,11 +39,15 @@ def check_data_files():
     """Check if required data files exist"""
     data_path = Path('data')
     required_files = [
-        'como_agecurve_wide.csv',
+        'como_agecurve_wide.csv',  # Main integrated dataset
+        'intermediate/Como_Wage_Breakdown_2425_2526_Cleaned.csv'  # Manual wage data
+    ]
+    
+    optional_files = [
         'intermediate/fbref_20242025.csv',
-        'intermediate/fbref_20252026.csv',
+        'intermediate/fbref_20252026.csv', 
         'intermediate/transfermarkt_contracts.csv',
-        'intermediate/capology_wages.csv'
+        'intermediate/capology_wages.csv'  # Scraped data (may be empty)
     ]
     
     missing_files = []
@@ -52,11 +56,47 @@ def check_data_files():
             missing_files.append(file)
     
     if missing_files:
-        print(f"❌ Missing data files: {', '.join(missing_files)}")
+        print(f"❌ Missing required data files: {', '.join(missing_files)}")
         print("Please ensure all data files are in the correct locations.")
         return False
     
+    # Check optional files
+    optional_missing = []
+    for file in optional_files:
+        if not (data_path / file).exists():
+            optional_missing.append(file)
+    
+    if optional_missing:
+        print(f"⚠️  Missing optional data files: {', '.join(optional_missing)}")
+        print("Dashboard will still run but with reduced functionality.")
+    
     return True
+
+def check_data_quality():
+    """Check data quality and provide insights"""
+    try:
+        import pandas as pd
+        data_path = Path('data')
+        
+        # Check main dataset
+        como_df = pd.read_csv(data_path / 'como_agecurve_wide.csv')
+        print(f"📊 Main dataset loaded: {como_df.shape[0]} players, {como_df.shape[1]} columns")
+        
+        # Check wage coverage
+        if 'Weekly_Gross_EUR' in como_df.columns:
+            wage_coverage = como_df['Weekly_Gross_EUR'].notna().sum()
+            print(f"💰 Wage data coverage: {wage_coverage}/{len(como_df)} players ({wage_coverage/len(como_df)*100:.1f}%)")
+        
+        # Check performance data
+        if 'Minutes_2425' in como_df.columns:
+            active_players = len(como_df[como_df['Minutes_2425'] >= 90])
+            print(f"⚽ Active players (>90 min): {active_players}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"⚠️  Data quality check failed: {e}")
+        return False
 
 def launch_dashboard():
     """Launch the Streamlit dashboard"""
@@ -87,8 +127,10 @@ def main():
     if not check_data_files():
         return
     
-    print("✅ All requirements satisfied!")
-    print("✅ Data files found!")
+    # Check data quality
+    check_data_quality()
+    
+    print("\n✅ All checks passed!")
     print()
     
     # Launch dashboard
