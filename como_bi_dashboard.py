@@ -5,28 +5,38 @@ Como 1907 Business Intelligence Dashboard
 A comprehensive Streamlit dashboard for Como 1907 stakeholders
 consolidating key insights from the EDA analysis.
 
-Wage Data Policy:
-- We treat the club-curated manual wage file as the ONLY authoritative source.
-- Required columns in manual file:
-  ['Player','Position','Age','Country','Gross_PW_EUR','Gross_PY_EUR','Season','Player_Clean']
-- Seasons in manual file are 'YYYY-YY' (e.g., '2024-25'); UI shows 'YYYY/YY'.
+Wage Data Policy (read me):
+- Capology live pages are unstable (DOM shifts, net vs gross ambiguity, duplicates).
+- We treat 'capology_manual' (club-curated CSV) as the *only* authoritative wage source.
+- 'capology' (scraped) can remain in the repo but is ignored here.
 
 Author: Iishaan Shekhar
 Date: October 2025
 """
 
-import streamlit as st
+# ----------------------------------------------------------------------
+# Imports (Streamlit dependency assumed; fail early with message if missing)
+# ----------------------------------------------------------------------
+try:
+    import streamlit as st
+except Exception as e:
+    raise SystemExit(
+        "Streamlit is required to run this app. Install with `pip install streamlit`.\n"
+        f"Import error: {e}"
+    )
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from pathlib import Path
-import unicodedata
-import re
+import unicodedata, re
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings('ignore')
 
 # ----------------------------------------------------------------------
-# Page configuration
+# Page configuration & styles
 # ----------------------------------------------------------------------
 st.set_page_config(
     page_title="Como 1907 Squad Analysis",
@@ -35,9 +45,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ----------------------------------------------------------------------
-# Custom CSS
-# ----------------------------------------------------------------------
 st.markdown("""
 <style>
     .main-header {
@@ -56,32 +63,11 @@ st.markdown("""
         border-bottom: 3px solid #3498db;
         padding-bottom: 0.5rem;
     }
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #3498db;
-        margin: 0.5rem 0;
-    }
-    .insight-box {
-        background-color: #e8f4fd;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 5px solid #2980b9;
-        margin: 1rem 0;
-    }
-    .recommendation-box {
-        background-color: #e8f8f5;
-        padding: 1.5rem;
-        border-radius: 10px;
-        border-left: 5px solid #27ae60;
-        margin: 1rem 0;
-    }
+    .metric-card { background-color: #f8f9fa; padding: 1rem; border-radius: 10px; border-left: 5px solid #3498db; margin: 0.5rem 0; }
+    .insight-box { background-color: #e8f4fd; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #2980b9; margin: 1rem 0; }
+    .recommendation-box { background-color: #e8f8f5; padding: 1.5rem; border-radius: 10px; border-left: 5px solid #27ae60; margin: 1rem 0; }
     .stTabs [data-baseweb="tab-list"] { gap: 2px; }
-    .stTabs [data-baseweb="tab"] {
-        height: 50px; white-space: pre-wrap; background-color: #f0f2f6;
-        border-radius: 4px 4px 0 0; gap: 1px; padding: 0 20px;
-    }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0 0; gap: 1px; padding: 0 20px; }
     .stTabs [aria-selected="true"] { background-color: #1f77b4; color: white; }
 </style>
 """, unsafe_allow_html=True)
@@ -90,9 +76,8 @@ st.markdown("""
 # Helpers
 # ----------------------------------------------------------------------
 def _normalize_name(s: str) -> str:
-    """Deterministic name normalizer (accents/punct/whitespace)."""
-    if pd.isna(s):
-        return ""
+    """Deterministic player name normalizer (no fuzzy deps)."""
+    if pd.isna(s): return ""
     s = str(s).strip().lower()
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
@@ -101,10 +86,16 @@ def _normalize_name(s: str) -> str:
     return s
 
 def _season_dash_to_slash(s: str) -> str:
-    """'2024-25' -> '2024/25' (UI canonical form)."""
+    """'2024-25' -> '2024/25' for UI."""
     if pd.isna(s): return "ALL"
     s = str(s).strip()
     return s.replace("-", "/") if "-" in s else s
+
+def _season_slash_to_dash(s: str) -> str:
+    """'2024/25' -> '2024-25' to match manual CSV, if needed."""
+    if pd.isna(s): return "ALL"
+    s = str(s).strip()
+    return s.replace("/", "-") if "/" in s else s
 
 def extract_market_value(value):
     if pd.isna(value) or value == "-":
@@ -123,7 +114,7 @@ def extract_age_from_string(age_str):
     if pd.isna(age_str): return np.nan
     if isinstance(age_str, (int, float)): return float(age_str)
     s = str(age_str)
-    if "-" in s:
+    if "-" in s:  # e.g., "21-013"
         return pd.to_numeric(s.split("-")[0], errors="coerce")
     return pd.to_numeric(s, errors="coerce")
 
@@ -137,85 +128,104 @@ def standardize_position(pos_str):
     return "Unknown"
 
 # ----------------------------------------------------------------------
-# Loaders (hard assumptions)
+# Loaders (keep your original references)
 # ----------------------------------------------------------------------
 @st.cache_data
 def load_data():
     """
-    Load datasets from project data folder.
-    Assumes manual wage file exact schema:
-    ['Player','Position','Age','Country','Gross_PW_EUR','Gross_PY_EUR','Season','Player_Clean']
+    Load datasets exactly like the original script.
+    We assume the following files exist under ./data and ./data/intermediate:
+      - como_agecurve_wide.csv
+      - intermediate/fbref_20242025.csv
+      - intermediate/fbref_20252026.csv
+      - intermediate/transfermarkt_contracts.csv
+      - intermediate/capology_wages.csv  (loaded but ignored)
+      - intermediate/Como_Wage_Breakdown_2425_2526_Cleaned.csv  (authoritative)
     """
-    data_path = Path("data")
-    como_agecurve = pd.read_csv(data_path / "como_agecurve_wide.csv")
-    fbref_2425 = pd.read_csv(data_path / "intermediate" / "fbref_20242025.csv")
-    fbref_2526 = pd.read_csv(data_path / "intermediate" / "fbref_20252026.csv")
-    transfermarkt = pd.read_csv(data_path / "intermediate" / "transfermarkt_contracts.csv")
+    data_path = Path('data')
 
-    # Authoritative manual wages (no fuzzy matching; strict schema)
-    manual = pd.read_csv(data_path / "intermediate" / "Como_Wage_Breakdown_2425_2526_Cleaned.csv")
+    como_agecurve = pd.read_csv(data_path / 'como_agecurve_wide.csv')
+    fbref_2425 = pd.read_csv(data_path / 'intermediate' / 'fbref_20242025.csv')
+    fbref_2526 = pd.read_csv(data_path / 'intermediate' / 'fbref_20252026.csv')
+    transfermarkt = pd.read_csv(data_path / 'intermediate' / 'transfermarkt_contracts.csv')
 
-    return como_agecurve, fbref_2425, fbref_2526, transfermarkt, manual
+    # Scraped capology is intentionally NOT used downstream
+    try:
+        capology_scraped = pd.read_csv(data_path / 'intermediate' / 'capology_wages.csv')
+    except Exception:
+        capology_scraped = pd.DataFrame()
+
+    # Manual wages file — single source of truth
+    capology_manual = pd.read_csv(data_path / 'intermediate' / 'Como_Wage_Breakdown_2425_2526_Cleaned.csv')
+
+    return como_agecurve, fbref_2425, fbref_2526, transfermarkt, capology_scraped, capology_manual
 
 def validate_manual_schema(df: pd.DataFrame):
+    """
+    We assume this exact schema for the manual wage file — no fuzzy matching.
+    Adjust here *only* if you physically change the CSV.
+    """
     required = [
-        "Player","Position","Age","Country",
-        "Gross_PW_EUR","Gross_PY_EUR","Season","Player_Clean"
+        "Player",          # manual display name
+        "Player_Clean",    # cleaned/joinable key (preferred)
+        "Position",
+        "Age",
+        "Country",
+        "Gross_PW_EUR",    # weekly gross
+        "Gross_PY_EUR",    # yearly gross
+        "Season"           # 'YYYY-YY' e.g. '2024-25'
     ]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        st.error(f"Manual wage file is missing required columns: {missing}")
+        st.error(f"Manual wage file missing required columns: {missing}")
         st.stop()
 
 # ----------------------------------------------------------------------
-# Wage Master (strict)
+# Wage Master (strict; no fuzz)
 # ----------------------------------------------------------------------
 def build_wage_master_strict(perf_df: pd.DataFrame,
                              manual_df: pd.DataFrame,
-                             season_choice_ui: str) -> pd.DataFrame:
+                             season_ui: str) -> pd.DataFrame:
     """
-    Strict, no-fuzzy build:
-    - Maps Gross_PW_EUR->Weekly_Gross_EUR, Gross_PY_EUR->Yearly_Gross_EUR
-    - Season filtered by UI (UI uses 'YYYY/YY', manual uses 'YYYY-YY')
-    - Joins perf.Player to manual.Player_Clean (fallback to manual.Player)
+    - Map Gross_PW_EUR -> Weekly_Gross_EUR; Gross_PY_EUR -> Yearly_Gross_EUR
+    - Filter by Season (UI uses 'YYYY/YY', manual uses 'YYYY-YY')
+    - Join perf.Player <-> manual.Player_Clean (fallback to manual.Player)
     """
     df = perf_df.copy()
 
-    # Ensure Player exists
+    # Ensure Player exists in performance DF
     if "Player" not in df.columns:
         for cand in ["Name", "FBRef_Name", "player"]:
             if cand in df.columns:
                 df = df.rename(columns={cand: "Player"})
                 break
     if "Player" not in df.columns:
-        st.error("Performance dataset lacks a Player column after normalization.")
+        st.error("Performance dataset lacks a 'Player' column after normalization.")
         st.stop()
 
-    # Manual schema validation
+    # Validate and prep manual
     validate_manual_schema(manual_df)
-
-    # Normalize seasons for UI (manual stays in dash format internally)
     manual = manual_df.copy()
-    manual["Season_UI"] = manual["Season"].apply(_season_dash_to_slash)
 
-    # Filter by season (UI provides '2024/25', '2025/26', or 'ALL')
-    if season_choice_ui != "ALL":
-        manual = manual[manual["Season_UI"] == season_choice_ui]
+    # Season filter
+    if season_ui != "ALL":
+        season_dash = _season_slash_to_dash(season_ui)  # '2024/25' -> '2024-25'
+        manual = manual[manual["Season"] == season_dash]
 
-    # Map wage columns to the app's expected names (no guessing)
+    # Map wages to expected columns
     manual = manual.rename(columns={
         "Gross_PW_EUR": "Weekly_Gross_EUR",
         "Gross_PY_EUR": "Yearly_Gross_EUR"
     })
 
-    # Build join keys: perf on Player; manual on Player_Clean (fallback Player)
+    # Build join keys
     df["join_key"] = df["Player"].apply(_normalize_name)
     manual_key_col = "Player_Clean" if "Player_Clean" in manual.columns else "Player"
     manual["join_key"] = manual[manual_key_col].apply(_normalize_name)
 
-    # Deduplicate manual on (join_key, Season_UI) preferring non-null wages
+    # Deduplicate manual per (join_key, Season), prefer non-null/high wages
     manual = (manual.sort_values(by=["Weekly_Gross_EUR","Yearly_Gross_EUR"], ascending=False)
-                    .groupby(["join_key","Season_UI"], as_index=False)
+                    .groupby(["join_key","Season"], as_index=False)
                     .agg({
                         manual_key_col: "first",
                         "Weekly_Gross_EUR": "first",
@@ -223,9 +233,9 @@ def build_wage_master_strict(perf_df: pd.DataFrame,
                         "Position": "first"
                     }))
 
-    # Merge wages
+    # Merge wages (authoritative)
     df = df.merge(
-        manual[["join_key","Weekly_Gross_EUR","Yearly_Gross_EUR"]],
+        manual[["join_key", "Weekly_Gross_EUR", "Yearly_Gross_EUR"]],
         on="join_key", how="left", validate="m:1"
     )
 
@@ -234,6 +244,34 @@ def build_wage_master_strict(perf_df: pd.DataFrame,
 # ----------------------------------------------------------------------
 # Scoring & Analysis
 # ----------------------------------------------------------------------
+def create_wage_analysis(df):
+    """Robust wage KPIs; never crash if columns are missing/empty."""
+    if "Weekly_Gross_EUR" not in df.columns:
+        return "No wage column(s) present"
+    wage_data = df.dropna(subset=["Weekly_Gross_EUR"])
+    if wage_data.empty:
+        return "No wage data available"
+    total_weekly = wage_data["Weekly_Gross_EUR"].sum()
+    total_yearly = (wage_data["Yearly_Gross_EUR"].sum()
+                    if "Yearly_Gross_EUR" in wage_data.columns
+                    else total_weekly * 52)
+    avg_weekly = wage_data["Weekly_Gross_EUR"].mean()
+    median_weekly = wage_data["Weekly_Gross_EUR"].median()
+
+    pos_col = "Position_Standard" if "Position_Standard" in wage_data.columns else ("Position" if "Position" in wage_data.columns else None)
+    show_cols = ["Player", "Weekly_Gross_EUR"]
+    if pos_col: show_cols.insert(1, pos_col)
+    if "Yearly_Gross_EUR" in wage_data.columns: show_cols.append("Yearly_Gross_EUR")
+    top_earners = wage_data.nlargest(10, "Weekly_Gross_EUR")[show_cols]
+    return {
+        "total_players": int(wage_data["Player"].nunique() if "Player" in wage_data.columns else wage_data.shape[0]),
+        "total_weekly": total_weekly,
+        "total_yearly": total_yearly,
+        "avg_weekly": avg_weekly,
+        "median_weekly": median_weekly,
+        "top_earners": top_earners
+    }
+
 def create_performance_score(df):
     df = df.copy()
     df["Performance_Score"] = 0.0
@@ -260,32 +298,6 @@ def create_performance_score(df):
         df["Performance_Score"] += df["Market_Value_Score"]
     return df
 
-def create_wage_analysis(df):
-    if "Weekly_Gross_EUR" not in df.columns:
-        return "No wage column(s) present"
-    wage_data = df.dropna(subset=["Weekly_Gross_EUR"])
-    if wage_data.empty:
-        return "No wage data available"
-    total_weekly = wage_data["Weekly_Gross_EUR"].sum()
-    total_yearly = (wage_data["Yearly_Gross_EUR"].sum()
-                    if "Yearly_Gross_EUR" in wage_data.columns
-                    else total_weekly * 52)
-    avg_weekly = wage_data["Weekly_Gross_EUR"].mean()
-    median_weekly = wage_data["Weekly_Gross_EUR"].median()
-    pos_col = "Position_Standard" if "Position_Standard" in wage_data.columns else ("Position" if "Position" in wage_data.columns else None)
-    show_cols = ["Player", "Weekly_Gross_EUR"]
-    if pos_col: show_cols.insert(1, pos_col)
-    if "Yearly_Gross_EUR" in wage_data.columns: show_cols.append("Yearly_Gross_EUR")
-    top_earners = wage_data.nlargest(10, "Weekly_Gross_EUR")[show_cols]
-    return {
-        "total_players": int(wage_data["Player"].nunique() if "Player" in wage_data.columns else wage_data.shape[0]),
-        "total_weekly": total_weekly,
-        "total_yearly": total_yearly,
-        "avg_weekly": avg_weekly,
-        "median_weekly": median_weekly,
-        "top_earners": top_earners
-    }
-
 # ----------------------------------------------------------------------
 # App
 # ----------------------------------------------------------------------
@@ -293,15 +305,15 @@ def main():
     st.markdown('<h1 class="main-header">⚽ Como 1907 Squad Analysis Dashboard</h1>', unsafe_allow_html=True)
     st.markdown("---")
 
-    # Load
+    # Load data
     try:
         with st.spinner("Loading squad data..."):
-            como_agecurve, fbref_2425, fbref_2526, transfermarkt, capology_manual = load_data()
+            como_agecurve, fbref_2425, fbref_2526, transfermarkt, capology_scraped, capology_manual = load_data()
     except Exception as e:
-        st.error(f"Failed to load data: {e}")
+        st.error(f"Error loading data: {e}")
         st.stop()
 
-    # Performance base
+    # Performance base from original file
     df_performance = como_agecurve.copy()
     if "Player" not in df_performance.columns:
         for cand in ["Name", "FBRef_Name", "player"]:
@@ -309,29 +321,32 @@ def main():
                 df_performance = df_performance.rename(columns={cand: "Player"})
                 break
     if "Player" not in df_performance.columns:
-        st.error("Performance dataset lacks a Player column after normalization.")
+        st.error("Performance dataset lacks a 'Player' column after normalization.")
         st.stop()
 
     df_performance["Position_Standard"] = df_performance.get("Latest_Pos4", pd.Series(index=df_performance.index)).apply(standardize_position)
     if "Minutes_2425" in df_performance.columns:
-        df_performance = df_performance[df_performance["Minutes_2425"].fillna(0) >= 90]
+        df_performance = df_performance[df_performance["Minutes_2425"].fillna(0) >= 90]  # keep your original filter
     df_performance = create_performance_score(df_performance)
 
-    # Sidebar
+    # Sidebar controls (unchanged in spirit)
     st.sidebar.title("📊 Dashboard Controls")
-    # Derive available seasons from manual (convert to UI slash form)
-    seasons_ui = sorted(capology_manual["Season"].astype(str).map(_season_dash_to_slash).unique().tolist())
-    # Ensure we offer a reasonable default order (latest first)
-    seasons_ui = sorted(seasons_ui)[::-1]
-    season_options = seasons_ui if seasons_ui else ["2024/25","2025/26"]
-    season_choice = st.sidebar.selectbox("Wage Season (manual)", options=season_options + ["ALL"], index=0)
 
-    # Join wages (strict, no fuzzy matching)
+    # Seasons from manual file; UI uses slash form
+    try:
+        seasons_ui = sorted(capology_manual["Season"].astype(str).map(_season_dash_to_slash).unique().tolist())
+        seasons_ui = sorted(seasons_ui)[::-1]  # latest first
+    except Exception:
+        seasons_ui = ["2024/25", "2025/26"]
+
+    season_choice = st.sidebar.selectbox("Wage Season (manual)", options=seasons_ui + ["ALL"], index=0)
+
+    # Build authoritative wage join BEFORE any wage analysis
     try:
         df_perf_with_wages = build_wage_master_strict(
             perf_df=df_performance,
             manual_df=capology_manual,
-            season_choice_ui=season_choice
+            season_ui=season_choice
         )
     except Exception as e:
         st.error(f"Error building wage master: {e}")
@@ -351,6 +366,7 @@ def main():
     mm_max = int(df_perf_with_wages["Minutes_2425"].fillna(0).max()) if "Minutes_2425" in df_perf_with_wages.columns else 0
     min_minutes = st.sidebar.slider("Minimum Minutes", min_value=0, max_value=mm_max, value=0)
 
+    # Apply filters
     filtered_df = df_perf_with_wages.copy()
     if "Age_numeric" in filtered_df.columns:
         filtered_df = filtered_df[filtered_df["Age_numeric"].between(age_range[0], age_range[1], inclusive="both")]
@@ -359,46 +375,44 @@ def main():
     if selected_position != "All":
         filtered_df = filtered_df[filtered_df["Position_Standard"] == selected_position]
 
-    # Wage analysis
+    # Wage analysis — now safe because we merged first
     wage_analysis = create_wage_analysis(filtered_df)
 
-    # Tabs
+    # Tabs (same structure as your original)
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-        "📊 Squad Overview",
+        "📊 Squad Overview", 
         "⚽ Performance Analysis",
         "💰 Salary Analysis",
-        "📈 Key Insights",
-        "🎯 Recommendations",
+        "📈 Key Insights", 
+        "🎯 Recommendations", 
         "📋 Detailed Reports"
     ])
-
+    
     with tab1:
         st.markdown('<h2 class="section-header">Squad Overview</h2>', unsafe_allow_html=True)
-        c1, c2, c3, c4 = st.columns(4)
-        with c1: st.metric("Total Players", len(filtered_df))
-        with c2:
+        col1, col2, col3, col4 = st.columns(4)
+        with col1: st.metric("Total Players", len(filtered_df))
+        with col2:
             if "Age_numeric" in filtered_df.columns and filtered_df["Age_numeric"].notna().any():
                 st.metric("Average Age", f"{filtered_df['Age_numeric'].mean():.1f} years")
             else:
                 st.metric("Average Age", "N/A")
-        with c3:
+        with col3:
             if "Minutes_2425" in filtered_df.columns:
                 st.metric("Total Minutes", f"{filtered_df['Minutes_2425'].sum():,.0f}")
             else:
                 st.metric("Total Minutes", "N/A")
-        with c4: st.metric("Avg Performance Score", f"{filtered_df['Performance_Score'].mean():.1f}")
+        with col4: st.metric("Avg Performance Score", f"{filtered_df['Performance_Score'].mean():.1f}")
 
         c1, c2 = st.columns(2)
         with c1:
             st.subheader("Position Distribution")
             pos_counts = filtered_df["Position_Standard"].value_counts()
-            fig = px.pie(values=pos_counts.values, names=pos_counts.index, title="Players by Position")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.pie(values=pos_counts.values, names=pos_counts.index, title="Players by Position"), use_container_width=True)
         with c2:
             st.subheader("Age Distribution")
             if "Age_numeric" in filtered_df.columns and filtered_df["Age_numeric"].notna().any():
-                fig = px.histogram(filtered_df, x="Age_numeric", nbins=15, title="Age Distribution")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(px.histogram(filtered_df, x="Age_numeric", nbins=15, title="Age Distribution"), use_container_width=True)
             else:
                 st.info("Age data not available")
 
@@ -414,15 +428,14 @@ def main():
         with c1:
             st.subheader("Performance Score by Position")
             pos_perf = filtered_df.groupby("Position_Standard")["Performance_Score"].mean().reset_index()
-            fig = px.bar(pos_perf, x="Position_Standard", y="Performance_Score", title="Average Performance Score by Position")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.bar(pos_perf, x="Position_Standard", y="Performance_Score",
+                                   title="Average Performance Score by Position"), use_container_width=True)
         with c2:
             st.subheader("Minutes vs Age")
             if "Age_numeric" in filtered_df.columns and "Minutes_2425" in filtered_df.columns:
-                fig = px.scatter(filtered_df, x="Age_numeric", y="Minutes_2425",
-                                 color="Position_Standard", size="Performance_Score",
-                                 title="Minutes Played vs Age")
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(px.scatter(filtered_df, x="Age_numeric", y="Minutes_2425",
+                                           color="Position_Standard", size="Performance_Score",
+                                           title="Minutes Played vs Age"), use_container_width=True)
             else:
                 st.info("Age or minutes data not available")
 
@@ -452,14 +465,14 @@ def main():
 
     with tab3:
         st.markdown('<h2 class="section-header">Salary Analysis (Manual Source)</h2>', unsafe_allow_html=True)
-        st.caption("Source: club-curated manual file. Columns: Gross_PW_EUR (weekly), Gross_PY_EUR (yearly).")
+        st.caption("Source: club-curated `Como_Wage_Breakdown_2425_2526_Cleaned.csv`. Scraped Capology is ignored.")
         if isinstance(wage_analysis, str):
             st.warning(f"💰 {wage_analysis}. Check the manual CSV, season filter, or join keys.")
-            with st.expander("Wage Audit (first 25 rows)"):
+            with st.expander("Wage Audit"):
+                # show first rows + unmatched players to debug quickly
                 cols = [c for c in ["Player","Position_Standard","Weekly_Gross_EUR","Yearly_Gross_EUR"] if c in filtered_df.columns]
                 if cols:
                     st.dataframe(filtered_df[cols].head(25), use_container_width=True)
-                # Show unmatched: players with no weekly wage
                 if "Weekly_Gross_EUR" in filtered_df.columns:
                     unmatched = filtered_df[filtered_df["Weekly_Gross_EUR"].isna()][["Player","Position_Standard"]].head(25)
                     if not unmatched.empty:
@@ -494,10 +507,10 @@ def main():
                 st.dataframe(salary_display, use_container_width=True)
 
                 st.subheader("📈 Weekly Salary Distribution")
-                fig = px.histogram(wage_filtered, x="Weekly_Gross_EUR",
-                                   title="Weekly Salary Distribution",
-                                   labels={"Weekly_Gross_EUR": "Weekly Salary (EUR)", "count": "Number of Players"})
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(px.histogram(wage_filtered, x="Weekly_Gross_EUR",
+                                             title="Weekly Salary Distribution",
+                                             labels={"Weekly_Gross_EUR": "Weekly Salary (EUR)", "count": "Number of Players"}),
+                                use_container_width=True)
             else:
                 st.info("No wage data available after filters.")
 
@@ -514,13 +527,13 @@ def main():
                 young = prime = vet = 0
             age_data = pd.DataFrame({"Category": ["Young (<23)","Prime (23-30)","Veteran (>30)"],
                                      "Count": [young, prime, vet]})
-            fig = px.pie(age_data, values="Count", names="Category", title="Age Distribution")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.pie(age_data, values="Count", names="Category", title="Age Distribution"),
+                            use_container_width=True)
         with c2:
             pos_data = filtered_df["Position_Standard"].value_counts().reset_index()
             pos_data.columns = ["Position", "Count"]
-            fig = px.bar(pos_data, x="Position", y="Count", title="Position Distribution")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.bar(pos_data, x="Position", y="Count", title="Position Distribution"),
+                            use_container_width=True)
 
         st.subheader("Key Insights")
         if not filtered_df.empty:
@@ -585,8 +598,8 @@ def main():
             if "Minutes_2425" in filtered_df.columns: display_cols.append("Minutes_2425")
             comparison_df = filtered_df[filtered_df["Player"].isin(selected_players)][display_cols]
             st.dataframe(comparison_df, use_container_width=True)
-            fig = px.bar(comparison_df, x="Player", y="Performance_Score", title="Performance Score Comparison")
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(px.bar(comparison_df, x="Player", y="Performance_Score", title="Performance Score Comparison"),
+                            use_container_width=True)
 
         st.subheader("Export Data")
         csv = filtered_df.to_csv(index=False).encode("utf-8")
@@ -612,5 +625,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
+        # Render a friendly error rather than crashing Streamlit's health check
         st.error(f"Unhandled error: {e}")
         st.stop()
