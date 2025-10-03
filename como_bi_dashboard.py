@@ -127,6 +127,22 @@ def _coerce_numeric(x):
     except Exception:
         return np.nan
 
+def normalize_manual_wages(df):
+    df = df.copy()
+    rename_map = {
+        'Weekly EUR':'Weekly_Gross_EUR',
+        'Weekly':'Weekly_Gross_EUR',
+        'Yearly EUR':'Yearly_Gross_EUR',
+        'Annual':'Yearly_Gross_EUR',
+    }
+    for k,v in rename_map.items():
+        if k in df.columns and v not in df.columns:
+            df = df.rename(columns={k:v})
+    for col in ['Weekly_Gross_EUR','Yearly_Gross_EUR']:
+        if col in df.columns:
+            df[col] = df[col].apply(_coerce_numeric)
+    return df
+
 # -----------------------------
 # Data loading
 # -----------------------------
@@ -348,29 +364,28 @@ def build_wage_master(perf_df: pd.DataFrame,
 # KPIs & Scoring
 # -----------------------------
 def create_wage_analysis(df):
-    wage_data = df.dropna(subset=["Weekly_Gross_EUR"])
+    required = ['Weekly_Gross_EUR']
+    if not all(col in df.columns for col in required):
+        return "No wage column(s) present"
+    wage_data = df.dropna(subset=['Weekly_Gross_EUR'])
     if wage_data.empty:
         return "No wage data available"
-    total_weekly = wage_data["Weekly_Gross_EUR"].sum()
-    total_yearly = wage_data["Yearly_Gross_EUR"].sum() if "Yearly_Gross_EUR" in wage_data.columns else total_weekly * 52
-    avg_weekly = wage_data["Weekly_Gross_EUR"].mean()
-    median_weekly = wage_data["Weekly_Gross_EUR"].median()
-    # For display, try to keep a position column if present
-    pos_col = "Position_Standard" if "Position_Standard" in wage_data.columns else ("Position" if "Position" in wage_data.columns else None)
-    show_cols = ["Player", "Weekly_Gross_EUR"]
-    if pos_col:
-        show_cols.insert(1, pos_col)
-    if "Yearly_Gross_EUR" in wage_data.columns:
-        show_cols.append("Yearly_Gross_EUR")
-    top_earners = wage_data.nlargest(10, "Weekly_Gross_EUR")[show_cols]
+    total_weekly = wage_data['Weekly_Gross_EUR'].sum()
+    total_yearly = (wage_data['Yearly_Gross_EUR'].sum()
+                    if 'Yearly_Gross_EUR' in wage_data.columns
+                    else total_weekly * 52)
     return {
-        "total_players": int(wage_data["join_key"].nunique()),
-        "total_weekly": total_weekly,
-        "total_yearly": total_yearly,
-        "avg_weekly": avg_weekly,
-        "median_weekly": median_weekly,
-        "top_earners": top_earners
+        'total_players': int(wage_data.shape[0]),
+        'total_weekly': total_weekly,
+        'total_yearly': total_yearly,
+        'avg_weekly': wage_data['Weekly_Gross_EUR'].mean(),
+        'median_weekly': wage_data['Weekly_Gross_EUR'].median(),
+        'top_earners': wage_data.nlargest(
+            10, 'Weekly_Gross_EUR'
+        )[[c for c in ['Player','Position','Position_Standard',
+                       'Weekly_Gross_EUR','Yearly_Gross_EUR'] if c in wage_data.columns]]
     }
+
 
 def create_performance_score(df):
     df = df.copy()
@@ -415,6 +430,33 @@ def main():
 
     # Process performance base
     df_performance = como_agecurve.copy()
+    capology_manual = normalize_manual_wages(capology_manual)
+
+    # build a robust join key (your normalizer)
+    def _norm_name(s):
+        s = '' if pd.isna(s) else str(s).strip().lower()
+        s = unicodedata.normalize("NFKD", s)
+        s = ''.join(ch for ch in s if not unicodedata.combining(ch))
+        return re.sub(r'[^a-z\s]',' ', s).split()
+        # or return a cleaned string; you just need consistency on both sides
+
+    df_performance['join_key'] = df_performance['Player'].apply(lambda s: ' '.join(_norm_name(s)))
+
+    name_col = 'Player' if 'Player' in capology_manual.columns else 'Name'
+    capology_manual['join_key'] = capology_manual[name_col].apply(lambda s: ' '.join(_norm_name(s)))
+
+    # (optional) filter manual by season here if your file mixes seasons
+    # capology_manual = capology_manual[capology_manual['Season'] == '2024/25']
+
+    wage_cols = [c for c in ['Weekly_Gross_EUR','Yearly_Gross_EUR'] if c in capology_manual.columns]
+    df_performance_with_wages = df_performance.merge(
+        capology_manual[['join_key'] + wage_cols],
+        on='join_key', how='left', validate='m:1'
+    )
+
+    wage_analysis = create_wage_analysis(df_performance_with_wages)
+
+
     # Ensure Player column exists
     if "Player" not in df_performance.columns:
         # try a best-effort rename
