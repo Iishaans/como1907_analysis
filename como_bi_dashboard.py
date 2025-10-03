@@ -238,8 +238,12 @@ def main():
     df_performance = df_performance[df_performance['Minutes_2425'] >= 90]  # Filter for sufficient minutes
     df_performance = create_performance_score(df_performance)
     
-    # Create wage analysis
-    wage_analysis = create_wage_analysis(df_performance)
+    # Use performance data with existing wage columns
+    # The wage data is already included in como_agecurve from the builder
+    df_performance_with_wages = df_performance.copy()
+    
+    # Create wage analysis with existing wage data
+    wage_analysis = create_wage_analysis(df_performance_with_wages)
     
     # Sidebar
     st.sidebar.title("📊 Dashboard Controls")
@@ -416,13 +420,15 @@ def main():
             
             # Position salary analysis
             st.subheader("📊 Average Salary by Position")
-            wage_filtered = df_performance.dropna(subset=['Weekly_Gross_EUR'])
+            wage_filtered = df_performance_with_wages.dropna(subset=['Weekly_Gross_EUR'])
             if not wage_filtered.empty:
-                salary_by_pos = wage_filtered.groupby('Position_Standard')['Weekly_Gross_EUR'].agg(['count', 'mean', 'median']).round(0)
-                salary_by_pos.columns = ['Count', 'Average', 'Median']
-                salary_by_pos['Average'] = salary_by_pos['Average'].apply(lambda x: f"€{x:,.0f}")
-                salary_by_pos['Median'] = salary_by_pos['Median'].apply(lambda x: f"€{x:,.0f}")
-                st.dataframe(salary_by_pos, use_container_width=True)
+                salary_stats = wage_filtered.groupby('Position_Standard')['Weekly_Gross_EUR'].agg(['count', 'mean', 'median']).round(0)
+                salary_display = pd.DataFrame({
+                    'Count': salary_stats['count'],
+                    'Average': salary_stats['mean'].apply(lambda x: f"€{x:,.0f}"),
+                    'Median': salary_stats['median'].apply(lambda x: f"€{x:,.0f}")
+                })
+                st.dataframe(salary_display, use_container_width=True)
                 
                 # Salary distribution chart
                 st.subheader("📈 Salary Distribution")
