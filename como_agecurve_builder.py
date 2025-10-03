@@ -267,6 +267,9 @@ def scrape_fbref_for_season(season: str) -> pd.DataFrame:
         if f"{season}_std_xG" in out.columns and f"{season}_std_xAG" in out.columns:
             out[f"{season}_derived_xG_plus_xAG"] = pd.to_numeric(out[f"{season}_std_xG"], errors='coerce') + \
                                                    pd.to_numeric(out[f"{season}_std_xAG"], errors='coerce')
+    # Deduplicate: keep only one row per player (if any duplicates exist, keep the first)
+    if out is not None and not out.empty:
+        out = out.drop_duplicates(subset=['Player'], keep='first')
     return out if out is not None else pd.DataFrame(columns=['Player'])
 
 def scrape_transfermarkt_contracts(year: int) -> pd.DataFrame:
@@ -300,6 +303,8 @@ def scrape_transfermarkt_contracts(year: int) -> pd.DataFrame:
         main['Player'] = main['Player'].map(normalize_name)
         if 'Contract_expires' in main.columns:
             main['Contract_expires'] = main['Contract_expires'].astype(str).str.replace(r'[^0-9\-/.]', '', regex=True)
+        # Deduplicate: keep only one row per player
+        main = main.drop_duplicates(subset=['Player'], keep='first')
     return main
 
 def scrape_capology_wages(season: str) -> pd.DataFrame:
@@ -326,6 +331,8 @@ def scrape_capology_wages(season: str) -> pd.DataFrame:
     out = table[keep_cols].copy()
     out.rename(columns={keep_cols[0]: 'Player'}, inplace=True)
     out['Player'] = out['Player'].map(normalize_name)
+    # Deduplicate: keep only one row per player
+    out = out.drop_duplicates(subset=['Player'], keep='first')
     return out
 
 # -------- Orchestration --------
@@ -335,6 +342,8 @@ def main():
         print(f"Scraping FBref for {season}...")
         df = scrape_fbref_for_season(season)
         if df is not None and not df.empty:
+            # Deduplicate: keep only one row per player
+            df = df.drop_duplicates(subset=['Player'], keep='first')
             frames.append(df)
             df.to_csv(os.path.join(INT_DIR, f"fbref_{season.replace('-', '')}.csv"), index=False)
         else:
@@ -343,6 +352,10 @@ def main():
     fbref_merged = None
     for df in frames:
         fbref_merged = df if fbref_merged is None else fbref_merged.merge(df, on='Player', how='outer')
+
+    # Deduplicate after merge
+    if fbref_merged is not None and not fbref_merged.empty:
+        fbref_merged = fbref_merged.drop_duplicates(subset=['Player'], keep='first')
 
     # Contracts
     try:
@@ -364,6 +377,8 @@ def main():
         )
     else:
         contracts = pd.DataFrame(columns=['Player','Season'])
+    # Deduplicate: keep only one row per player per season
+    contracts = contracts.drop_duplicates(subset=['Player', 'Season'], keep='first')
     contracts.to_csv(os.path.join(INT_DIR, "transfermarkt_contracts.csv"), index=False)
 
     # Wages
@@ -386,12 +401,23 @@ def main():
         )
     else:
         wages = pd.DataFrame(columns=['Player','Season'])
+    # Deduplicate: keep only one row per player per season
+    wages = wages.drop_duplicates(subset=['Player', 'Season'], keep='first')
     wages.to_csv(os.path.join(INT_DIR, "capology_wages.csv"), index=False)
 
     # Merge all
     out = fbref_merged if fbref_merged is not None else pd.DataFrame(columns=['Player'])
     out = out.merge(contracts, on=['Player'], how='left', suffixes=('', '_tm'))
     out = out.merge(wages, on=['Player', 'Season'], how='left', suffixes=('', '_capo'))
+
+    # Deduplicate after all merges: keep only one row per player
+    # Sort by Season to prefer 2025-2026 (more recent) data
+    if 'Season' in out.columns:
+        out['Season_priority'] = out['Season'].map({'2025-2026': 1, '2024-2025': 2})
+        out = out.sort_values(['Player', 'Season_priority']).drop_duplicates(subset=['Player'], keep='first')
+        out = out.drop(columns=['Season_priority'])
+    else:
+        out = out.drop_duplicates(subset=['Player'], keep='first')
 
     # Recompute simple labels
     pos_cols = [c for c in out.columns if c.endswith('_std_Pos')]
@@ -432,6 +458,15 @@ def main():
         f3 = pd.to_numeric(out.get(f'{season}_poss_Att 3rd', pd.Series([None]*len(out))), errors='coerce')
         out[f'FinalThirdTouches_{season[-2:]}'] = f3
         out[f'FinalThirdTouches_per90_{season[-2:]}'] = (f3 / nineties).where((nineties > 0) & f3.notna())
+
+    # Final deduplication: ensure only one row per player
+    # Sort by Season to prefer 2025-2026 (more recent) data
+    if 'Season' in out.columns:
+        out['Season_priority'] = out['Season'].map({'2025-2026': 1, '2024-2025': 2})
+        out = out.sort_values(['Player', 'Season_priority']).drop_duplicates(subset=['Player'], keep='first')
+        out = out.drop(columns=['Season_priority'])
+    else:
+        out = out.drop_duplicates(subset=['Player'], keep='first')
 
     # Export
     os.makedirs(OUT_DIR, exist_ok=True)
