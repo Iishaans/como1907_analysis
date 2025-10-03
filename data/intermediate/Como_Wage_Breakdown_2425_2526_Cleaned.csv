@@ -1,0 +1,76 @@
+Player,Position,Age,Country,Gross_PW_EUR,Gross_PY_EUR,Season,Player_Clean
+Maxence Caqueret,M,24,France,128269,6670000,2024-25,Maxence Caqueret
+Dele Alli,F,28,England,106923,5560000,2024-25,Dele Alli
+Raphaël Varane,D,31,France,106923,5560000,2024-25,Raphael Varane
+Andrea Belotti,F,30,Italy,53462,2780000,2024-25,Andrea Belotti
+Luca Mazzitelli,M,28,Italy,49808,2590000,2024-25,Luca Mazzitelli
+Sergi Roberto,M,32,Spain,42692,2220000,2024-25,Sergi Roberto
+Alberto Dossena,D,26,Italy,35577,1850000,2024-25,Alberto Dossena
+Máximo Perrone,M,22,Argentina,35577,1850000,2024-25,Maximo Perrone
+Emil Audero,K,27,Italy,32115,1670000,2024-25,Emil Audero
+Simone Verdi,F,32,Italy,28462,1480000,2024-25,Simone Verdi
+Anastasios Douvikas,F,25,Greece,28462,1480000,2024-25,Anastasios Douvikas
+Mërgim Vojvoda,D,30,Kosovo,26731,1390000,2024-25,Mergim Vojvoda
+Daniele Baselli,M,32,Italy,25000,1300000,2024-25,Daniele Baselli
+Alberto Moreno,D,32,Spain,25000,1300000,2024-25,Alberto Moreno
+Marc Oliver Kempf,D,30,Germany,21346,1110000,2024-25,Marc Oliver Kempf
+Jonathan Ikoné,F,26,France,20962,1090000,2024-25,Jonathan Ikone
+Alberto Cerri,F,28,Italy,19615,1020000,2024-25,Alberto Cerri
+Assane Diao,F,19,Spain,17885,930000,2024-25,Assane Diao
+Yannik Engelhardt,M,23,Germany,17885,930000,2024-25,Yannik Engelhardt
+Pepe Reina,K,42,Spain,17885,930000,2024-25,Pepe Reina
+Nico Paz,F,20,Argentina,17885,930000,2024-25,Nico Paz
+Jean Butez,K,29,France,17885,930000,2024-25,Jean Butez
+Alieu Fadera,F,23,The Gambia,15962,830000,2024-25,Alieu Fadera
+Alessandro Gabrielloni,F,30,Italy,15000,780000,2024-25,Alessandro Gabrielloni
+Lucas Da Cunha,M,23,France,14808,770000,2024-25,Lucas da Cunha
+Federico Barba,D,31,Italy,14231,740000,2024-25,Federico Barba
+Gabriel Strefezza,F,27,Brazil,14231,740000,2024-25,Gabriel Strefezza
+Edoardo Goldaniga,D,31,Italy,14231,740000,2024-25,Edoardo Goldaniga
+Patrick Cutrone,F,27,Italy,12308,640000,2024-25,Patrick Cutrone
+Ivan Smolcic,D,24,Croatia,10769,560000,2024-25,Ivan Smolcic
+Álex Valle,M,20,Spain,10769,560000,2024-25,Alex Valle
+Matthias Braunöder,M,22,Austria,8846,460000,2024-25,Matthias Braunoder
+Iván Azón,F,22,Spain,8846,460000,2024-25,Ivan Azon
+Ignace Van der Brempt,D,22,Belgium,8846,460000,2024-25,Ignace van der Brempt
+Moutir Chajia,F,26,Belgium,8846,460000,2024-25,Moutir Chajia
+Marco Sala,D,25,Italy,5385,280000,2024-25,Marco Sala
+Ben Lhassine Kone,M,24,Cote d'Ivoire,5385,280000,2024-25,Ben Lhassine Kone
+Pierre Bolchini,K,25,Italy,3654,190000,2024-25,Pierre Bolchini
+Ali Jasim,F,20,Iraq,3654,190000,2024-25,Ali Jasim
+Mauro Vigorito,K,34,Italy,3269,170000,2024-25,Mauro Vigorito
+Naj Razi,F,18,Ireland,3269,170000,2024-25,Naj Razi
+Giuseppe Mazzaglia,M,18,Italy,3269,170000,2024-25,Giuseppe Mazzaglia
+Fellipe Jack,D,19,Brazil,2885,150000,2024-25,Fellipe Jack
+Alessio Iovine,M,34,Italy,2885,150000,2024-25,Alessio Iovine
+Peter Kovacik,M,22,Slovakia,0,0,2024-25,Peter Kovacik
+Álvaro Morata,F,32,Spain,160192,8330000,2025-26,Alvaro Morata
+Maxence Caqueret,M,25,France,128269,6670000,2025-26,Maxence Caqueret
+Diego Carlos,D,32,Brazil,71154,3700000,2025-26,Diego Carlos
+Sergi Roberto,M,33,Spain,42692,2220000,2025-26,Sergi Roberto
+Nicolas Kühn,F,25,Germany,39231,2040000,2025-26,Nicolas Kuhn
+Máximo Perrone,M,22,Argentina,35577,1850000,2025-26,Maximo Perrone
+Alberto Dossena,D,26,Italy,35577,1850000,2025-26,Alberto Dossena
+Anastasios Douvikas,F,26,Greece,28462,1480000,2025-26,Anastasios Douvikas
+Mërgim Vojvoda,D,30,Kosovo,26731,1390000,2025-26,Mergim Vojvoda
+Alberto Moreno,D,33,Spain,25000,1300000,2025-26,Alberto Moreno
+Marc Oliver Kempf,D,30,Germany,21346,1110000,2025-26,Marc Oliver Kempf
+Jesús Rodríguez,F,19,Spain,21346,1110000,2025-26,Jesus Rodriguez
+Alberto Cerri,F,29,Italy,19615,1020000,2025-26,Alberto Cerri
+Stefan Posch,D,28,Austria,19231,1000000,2025-26,Stefan Posch
+Martin Baturina,M,22,Croatia,17885,930000,2025-26,Martin Baturina
+Jean Butez,K,30,France,17885,930000,2025-26,Jean Butez
+Nico Paz,F,20,Argentina,17885,930000,2025-26,Nico Paz
+Assane Diao,F,19,Spain,17885,930000,2025-26,Assane Diao
+Edoardo Goldaniga,D,31,Italy,17885,930000,2025-26,Edoardo Goldaniga
+Jayden Addai,F,20,Netherlands,15962,830000,2025-26,Jayden Addai
+Lucas Da Cunha,M,24,France,14808,770000,2025-26,Lucas da Cunha
+Álex Valle,D,21,Spain,10769,560000,2025-26,Alex Valle
+Ivan Smolcic,D,25,Croatia,10769,560000,2025-26,Ivan Smolcic
+Ignace Van der Brempt,D,23,Belgium,8846,460000,2025-26,Ignace van der Brempt
+Nikola Cavlina,K,23,Croatia,7115,370000,2025-26,Nikola Cavlina
+Peter Kovacik,D,22,Slovakia,7115,370000,2025-26,Peter Kovacik
+Jacobo Ramón,D,20,Spain,5769,300000,2025-26,Jacobo Ramon
+Marco Sala,D,26,Italy,5385,280000,2025-26,Marco Sala
+Mauro Vigorito,K,35,Italy,3269,170000,2025-26,Mauro Vigorito
+Henrique Menke,K,18,Brazil,2500,130000,2025-26,Henrique Menke

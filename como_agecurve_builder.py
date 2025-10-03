@@ -381,29 +381,52 @@ def main():
     contracts = contracts.drop_duplicates(subset=['Player', 'Season'], keep='first')
     contracts.to_csv(os.path.join(INT_DIR, "transfermarkt_contracts.csv"), index=False)
 
-    # Wages
+    # Wages - Use manually scraped comprehensive wage data
     try:
-        wages_2425 = scrape_capology_wages("2024-2025")
-    except Exception as e:
-        print("[WARN] Capology 2024-25 scrape failed:", e)
-        wages_2425 = pd.DataFrame()
+        wage_file = os.path.join(INT_DIR, "Como_Wage_Breakdown_2425_2526_Cleaned.csv")
+        if os.path.exists(wage_file):
+            wages_raw = pd.read_csv(wage_file)
+            print(f"Loaded comprehensive wage data: {wage_file}")
+            print(f"Wage data shape: {wages_raw.shape}")
+            
+            # Process wage data to match expected format
+            wages = wages_raw[['Player_Clean', 'Season', 'Gross_PW_EUR', 'Gross_PY_EUR', 'Position', 'Age']].copy()
+            wages.rename(columns={'Player_Clean': 'Player', 'Gross_PW_EUR': 'Weekly_Gross_EUR', 'Gross_PY_EUR': 'Yearly_Gross_EUR'}, inplace=True)
+            
+            # Convert season format to match other data (2024-25 -> 2024-2025, 2025-26 -> 2025-2026)
+            wages['Season'] = wages['Season'].str.replace('2024-25', '2024-2025').str.replace('2025-26', '2025-2026')
+            
+        else:
+            # Fallback to old scraper if manual data not available
+            print("[WARN] Manual wage data not found, falling back to Capology scraper")
+            try:
+                wages_2425 = scrape_capology_wages("2024-2025")
+            except Exception as e:
+                print("[WARN] Capology 2024-25 scrape failed:", e)
+                wages_2425 = pd.DataFrame()
 
-    try:
-        wages_2526 = scrape_capology_wages("2025-2026")
-    except Exception as e:
-        print("[WARN] Capology 2025-26 scrape failed:", e)
-        wages_2526 = pd.DataFrame()
+            try:
+                wages_2526 = scrape_capology_wages("2025-2026")
+            except Exception as e:
+                print("[WARN] Capology 2025-26 scrape failed:", e)
+                wages_2526 = pd.DataFrame()
 
-    if not wages_2425.empty or not wages_2526.empty:
-        wages = pd.concat(
-            [wages_2425.assign(Season='2024-2025'), wages_2526.assign(Season='2025-2026')],
-            ignore_index=True
-        )
-    else:
+            if not wages_2425.empty or not wages_2526.empty:
+                wages = pd.concat(
+                    [wages_2425.assign(Season='2024-2025'), wages_2526.assign(Season='2025-2026')],
+                    ignore_index=True
+                )
+            else:
+                wages = pd.DataFrame(columns=['Player','Season'])
+                
+    except Exception as e:
+        print(f"[ERROR] Failed to process wage data: {e}")
         wages = pd.DataFrame(columns=['Player','Season'])
+        
     # Deduplicate: keep only one row per player per season
-    wages = wages.drop_duplicates(subset=['Player', 'Season'], keep='first')
-    wages.to_csv(os.path.join(INT_DIR, "capology_wages.csv"), index=False)
+    if not wages.empty:
+        wages = wages.drop_duplicates(subset=['Player', 'Season'], keep='first')
+        wages.to_csv(os.path.join(INT_DIR, "capology_wages.csv"), index=False)
 
     # Merge all
     out = fbref_merged if fbref_merged is not None else pd.DataFrame(columns=['Player'])

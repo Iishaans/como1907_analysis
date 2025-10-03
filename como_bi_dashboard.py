@@ -151,6 +151,31 @@ def extract_age_from_string(age_str):
     except:
         return None
 
+def create_wage_analysis(df):
+    """Create comprehensive wage analysis"""
+    wage_data = df.dropna(subset=['Weekly_Gross_EUR'])
+    
+    if wage_data.empty:
+        return "No wage data available"
+    
+    # Basic statistics
+    total_weekly = wage_data['Weekly_Gross_EUR'].sum()
+    total_yearly = wage_data['Yearly_Gross_EUR'].sum()
+    avg_weekly = wage_data['Weekly_Gross_EUR'].mean()
+    median_weekly = wage_data['Weekly_Gross_EUR'].median()
+    
+    # Top earners
+    top_earners = wage_data.nlargest(10, 'Weekly_Gross_EUR')
+    
+    return {
+        'total_players': len(wage_data),
+        'total_weekly': total_weekly,
+        'total_yearly': total_yearly,
+        'avg_weekly': avg_weekly,
+        'median_weekly': median_weekly,
+        'top_earners': top_earners
+    }
+
 def create_performance_score(df):
     """Create performance scores for players"""
     df = df.copy()
@@ -213,6 +238,9 @@ def main():
     df_performance = df_performance[df_performance['Minutes_2425'] >= 90]  # Filter for sufficient minutes
     df_performance = create_performance_score(df_performance)
     
+    # Create wage analysis
+    wage_analysis = create_wage_analysis(df_performance)
+    
     # Sidebar
     st.sidebar.title("📊 Dashboard Controls")
     
@@ -255,9 +283,10 @@ def main():
         filtered_df = filtered_df[filtered_df['Position_Standard'] == selected_position]
     
     # Main content tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Squad Overview", 
-        "⚽ Performance Analysis", 
+        "⚽ Performance Analysis",
+        "💰 Salary Analysis",
         "📈 Key Insights", 
         "🎯 Recommendations", 
         "📋 Detailed Reports"
@@ -363,6 +392,48 @@ def main():
                     st.dataframe(top_pos, use_container_width=True)
     
     with tab3:
+        st.markdown('<h2 class="section-header">Salary Analysis</h2>', unsafe_allow_html=True)
+        
+        if isinstance(wage_analysis, dict):
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("/59 Players", f"{wage_analysis['total_players']}")
+            with col2:
+                st.metric("Weekly Wage Bill", f"€{wage_analysis['total_weekly']:,.0f}")
+            with col3:
+                st.metric("Annual Wage Bill", f"€{wage_analysis['total_yearly']:,.0f}")
+            with col4:
+                st.metric("Avg Weekly Wage", f"€{wage_analysis['avg_weekly']:,.0f}")
+            
+            # Top earners table
+            st.subheader("🏆 Top Earners")
+            top_earners_display = wage_analysis['top_earners'][['Player', 'Position', 'Weekly_Gross_EUR', 'Yearly_Gross_EUR']].copy()
+            top_earners_display['Weekly Gross EUR'] = top_earners_display['Weekly_Gross_EUR'].apply(lambda x: f"€{x:,.0f}")
+            top_earners_display['Yearly Gross EUR'] = top_earners_display['Yearly_Gross_EUR'].apply(lambda x: f"€{x:,.0f}")
+            top_earners_display = top_earners_display.drop(columns=['Weekly_Gross_EUR', 'Yearly_Gross_EUR'])
+            st.dataframe(top_earners_display, use_container_width=True)
+            
+            # Position salary analysis
+            st.subheader("📊 Average Salary by Position")
+            wage_filtered = df_performance.dropna(subset=['Weekly_Gross_EUR'])
+            if not wage_filtered.empty:
+                salary_by_pos = wage_filtered.groupby('Position_Standard')['Weekly_Gross_EUR'].agg(['count', 'mean', 'median']).round(0)
+                salary_by_pos.columns = ['Count', 'Average', 'Median']
+                salary_by_pos['Average'] = salary_by_pos['Average'].apply(lambda x: f"€{x:,.0f}")
+                salary_by_pos['Median'] = salary_by_pos['Median'].apply(lambda x: f"€{x:,.0f}")
+                st.dataframe(salary_by_pos, use_container_width=True)
+                
+                # Salary distribution chart
+                st.subheader("📈 Salary Distribution")
+                fig = px.histogram(wage_filtered, x='Weekly_Gross_EUR', 
+                                 title="Weekly Salary Distribution",
+                                 labels={'Weekly_Gross_EUR': 'Weekly Salary (EUR)', 'count': 'Number of Players'})
+                st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("💰 Wage data not available - using manual Capology data file")
+            
+    with tab4:
         st.markdown('<h2 class="section-header">Key Insights</h2>', unsafe_allow_html=True)
         
         # Squad balance analysis
@@ -418,7 +489,7 @@ def main():
         for insight in insights:
             st.markdown(f'<div class="insight-box">{insight}</div>', unsafe_allow_html=True)
     
-    with tab4:
+    with tab5:
         st.markdown('<h2 class="section-header">Strategic Recommendations</h2>', unsafe_allow_html=True)
         
         # Squad management recommendations
@@ -457,7 +528,7 @@ def main():
                     else:
                         st.write("📊 **Analysis Phase**: Focus on performance optimization")
     
-    with tab5:
+    with tab6:
         st.markdown('<h2 class="section-header">Detailed Reports</h2>', unsafe_allow_html=True)
         
         # Player comparison

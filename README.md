@@ -66,7 +66,7 @@ como1907_analysis/
 ### Data Sources
 - **FBref**: Player statistics, minutes played, positional data, and performance metrics
 - **Transfermarkt**: Market values, contract information, and player valuations
-- **Capology**: Wage and salary data for cost analysis
+- **Manual Wage Data**: Comprehensive salary breakdown for 35 players (Capology web scraper temporarily unavailable)
 - **Time Period**: 2024-25 and 2025-26 seasons (current and previous)
 
 ### Key Metrics Applied
@@ -104,10 +104,12 @@ como1907_analysis/
 - **Long-term Sustainability**: Age curve analysis for strategic planning
 
 ### Financial Efficiency
+- **Total Wage Bill**: €45.2m annual salary expenditure (59.3% squad coverage)
 - **Market Value Analysis**: Player valuations and market positioning
 - **Wage Optimization**: Cost-effective performers and potential overpayments
-- **ROI Assessment**: Performance per euro spent analysis
-- **Budget Allocation**: Strategic distribution of financial resources
+- **ROI Assessment**: Performance per euro spent analysis (cost per minute analysis)
+- **Budget Allocation**: Strategic distribution of financial resources by position
+- **Top Earner Analysis**: Maxence Caqueret leads at €128k/week, Dele Alli follows at €107k/week
 
 ### Strategic Recommendations
 1. **Squad Management**: Focus on developing young talent while maintaining experience

@@ -5,7 +5,7 @@ This package creates a **wide, BI-ready CSV** for Como 1907 that includes:
 - Per-player minutes, age, position labels
 - xG+xA, progressive passes, final-third touches (FBref)
 - Contracts (Transfermarkt)
-- Wages (Capology)
+- Wages (Manually scraped Capology data - web scraper temporarily unavailable)
 
 ## Outputs
 - `data/como_agecurve_wide.csv` — main training table
@@ -25,7 +25,8 @@ This package creates a **wide, BI-ready CSV** for Como 1907 that includes:
 ## Notes
 - FBref sometimes nests tables in HTML **comments**; this script extracts both visible and commented tables.
 - Column names vary slightly season-to-season; the script normalizes the common fields (e.g., progressive passes).
-- Transfermarkt/Capology are scraped with simple `read_html` heuristics; if their layout changes, update selectors.
+- Transfermarkt is scraped with simple `read_html` heuristics; if layout changes, update selectors.
+- Capology wage data is manually scraped (`Como_Wage_Breakdown_2425_2526_Cleaned.csv`) due to web scraper issues.
 - Financials are **estimates**; treat as directional, not official.
 
 ## Feature Highlights
