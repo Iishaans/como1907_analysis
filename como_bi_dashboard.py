@@ -6,9 +6,10 @@ A comprehensive Streamlit dashboard for Como 1907 stakeholders
 consolidating key insights from the EDA analysis.
 
 Wage Data Policy:
-- Capology's scraped tables are unstable (layout shifts, net vs gross ambiguity, duplicates).
-- We treat 'capology_manual' (club-curated CSV) as the *only* authoritative wage source.
-- Fallback to scraped Capology is available behind a toggle, but disabled by default.
+- We treat the club-curated manual wage file as the ONLY authoritative source.
+- Required columns in manual file:
+  ['Player','Position','Age','Country','Gross_PW_EUR','Gross_PY_EUR','Season','Player_Clean']
+- Seasons in manual file are 'YYYY-YY' (e.g., '2024-25'); UI shows 'YYYY/YY'.
 
 Author: Iishaan Shekhar
 Date: October 2025
@@ -17,13 +18,10 @@ Date: October 2025
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt  # kept for parity, charts use plotly
-import seaborn as sns  # optional; safe to remove
 import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from pathlib import Path
-import unicodedata, re
+import unicodedata
+import re
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -89,28 +87,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ----------------------------------------------------------------------
-# Helpers and Normalizers
+# Helpers
 # ----------------------------------------------------------------------
-def _coerce_numeric(x):
-    """Convert '€1,234', '1,234', 1234 -> float (EUR)."""
-    if pd.isna(x):
-        return np.nan
-    if isinstance(x, (int, float)):
-        return float(x)
-    s = str(x).replace("€", "").replace(",", "").strip()
-    try:
-        return float(s)
-    except Exception:
-        return np.nan
-
 def _normalize_name(s: str) -> str:
-    """
-    Robust player name normalizer:
-    - lowercase
-    - strip accents
-    - drop punctuation
-    - collapse whitespace
-    """
+    """Deterministic name normalizer (accents/punct/whitespace)."""
     if pd.isna(s):
         return ""
     s = str(s).strip().lower()
@@ -120,46 +100,24 @@ def _normalize_name(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
-def _normalize_season(s):
-    """
-    Map season labels to a canonical shape like '2024/25'.
-    Accepts: '24-25', '2425', '2024/25', '2024-25', etc.
-    """
-    if pd.isna(s):
-        return "ALL"
-    s = str(s).strip().replace(" ", "").replace("-", "/")
-    if re.fullmatch(r"\d{2}/\d{2}", s):
-        return f"20{s[:2]}/{s[-2:]}"  # 24/25 -> 2024/25
-    if re.fullmatch(r"\d{4}", s):
-        return f"20{s[:2]}/{s[-2:]}"  # 2425  -> 2024/25
-    return s  # 2024/25 stays
-
-def standardize_position(pos_str):
-    if pd.isna(pos_str):
-        return "Unknown"
-    pos_str = str(pos_str).upper()
-    if "GK" in pos_str: return "GK"
-    if "DF" in pos_str or "DEF" in pos_str or "BACK" in pos_str: return "DF"
-    if "MF" in pos_str or "MID" in pos_str: return "MF"
-    if "FW" in pos_str or "FOR" in pos_str or "STRIKER" in pos_str: return "FW"
-    return "Unknown"
+def _season_dash_to_slash(s: str) -> str:
+    """'2024-25' -> '2024/25' (UI canonical form)."""
+    if pd.isna(s): return "ALL"
+    s = str(s).strip()
+    return s.replace("-", "/") if "-" in s else s
 
 def extract_market_value(value):
     if pd.isna(value) or value == "-":
         return 0.0
     s = str(value).lower().replace("€", "").strip()
     mult = 1.0
-    if s.endswith("m"):
-        mult = 1_000_000.0; s = s[:-1]
-    elif s.endswith("k"):
-        mult = 1_000.0; s = s[:-1]
+    if s.endswith("m"): mult = 1_000_000.0; s = s[:-1]
+    elif s.endswith("k"): mult = 1_000.0; s = s[:-1]
     try:
         return float(s) * mult
     except Exception:
-        try:
-            return float(s)
-        except Exception:
-            return 0.0
+        try: return float(s)
+        except Exception: return 0.0
 
 def extract_age_from_string(age_str):
     if pd.isna(age_str): return np.nan
@@ -169,13 +127,24 @@ def extract_age_from_string(age_str):
         return pd.to_numeric(s.split("-")[0], errors="coerce")
     return pd.to_numeric(s, errors="coerce")
 
+def standardize_position(pos_str):
+    if pd.isna(pos_str): return "Unknown"
+    pos_str = str(pos_str).upper()
+    if "GK" in pos_str: return "GK"
+    if any(k in pos_str for k in ["DF","DEF","BACK"]): return "DF"
+    if any(k in pos_str for k in ["MF","MID"]): return "MF"
+    if any(k in pos_str for k in ["FW","FOR","STRIKER"]): return "FW"
+    return "Unknown"
+
 # ----------------------------------------------------------------------
-# Loaders
+# Loaders (hard assumptions)
 # ----------------------------------------------------------------------
 @st.cache_data
 def load_data():
     """
-    Load datasets. Scraped capology is loaded but not used unless fallback enabled.
+    Load datasets from project data folder.
+    Assumes manual wage file exact schema:
+    ['Player','Position','Age','Country','Gross_PW_EUR','Gross_PY_EUR','Season','Player_Clean']
     """
     data_path = Path("data")
     como_agecurve = pd.read_csv(data_path / "como_agecurve_wide.csv")
@@ -183,137 +152,82 @@ def load_data():
     fbref_2526 = pd.read_csv(data_path / "intermediate" / "fbref_20252026.csv")
     transfermarkt = pd.read_csv(data_path / "intermediate" / "transfermarkt_contracts.csv")
 
-    try:
-        capology_scraped = pd.read_csv(data_path / "intermediate" / "capology_wages.csv")
-    except Exception:
-        capology_scraped = pd.DataFrame()
+    # Authoritative manual wages (no fuzzy matching; strict schema)
+    manual = pd.read_csv(data_path / "intermediate" / "Como_Wage_Breakdown_2425_2526_Cleaned.csv")
 
-    capology_manual = pd.read_csv(
-        data_path / "intermediate" / "Como_Wage_Breakdown_2425_2526_Cleaned.csv"
-    )
+    return como_agecurve, fbref_2425, fbref_2526, transfermarkt, manual
 
-    return como_agecurve, fbref_2425, fbref_2526, transfermarkt, capology_scraped, capology_manual
+def validate_manual_schema(df: pd.DataFrame):
+    required = [
+        "Player","Position","Age","Country",
+        "Gross_PW_EUR","Gross_PY_EUR","Season","Player_Clean"
+    ]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        st.error(f"Manual wage file is missing required columns: {missing}")
+        st.stop()
 
 # ----------------------------------------------------------------------
-# Wage Master (authoritative) + Fallback
+# Wage Master (strict)
 # ----------------------------------------------------------------------
-def normalize_manual_wages(df: pd.DataFrame) -> pd.DataFrame:
-    """Standardize manual CSV schema and coerce numerics."""
-    out = df.copy()
-    rename_map = {
-        "Weekly EUR": "Weekly_Gross_EUR",
-        "Weekly": "Weekly_Gross_EUR",
-        "Weekly Gross EUR": "Weekly_Gross_EUR",
-        "Yearly EUR": "Yearly_Gross_EUR",
-        "Annual": "Yearly_Gross_EUR",
-        "Yearly Gross EUR": "Yearly_Gross_EUR",
-    }
-    for old, new in rename_map.items():
-        if old in out.columns and new not in out.columns:
-            out = out.rename(columns={old: new})
-    for col in ["Weekly_Gross_EUR", "Yearly_Gross_EUR"]:
-        if col in out.columns:
-            out[col] = out[col].apply(_coerce_numeric)
-    return out
-
-def build_wage_master(perf_df: pd.DataFrame,
-                      manual_df: pd.DataFrame,
-                      scraped_df: pd.DataFrame,
-                      season_label: str,
-                      enable_fallback_to_scraped: bool = False) -> pd.DataFrame:
+def build_wage_master_strict(perf_df: pd.DataFrame,
+                             manual_df: pd.DataFrame,
+                             season_choice_ui: str) -> pd.DataFrame:
     """
-    Join authoritative wages onto performance frame using normalized names.
-    Priority: capology_manual ONLY. If missing and fallback flag is True,
-    then fill from scraped capology.
+    Strict, no-fuzzy build:
+    - Maps Gross_PW_EUR->Weekly_Gross_EUR, Gross_PY_EUR->Yearly_Gross_EUR
+    - Season filtered by UI (UI uses 'YYYY/YY', manual uses 'YYYY-YY')
+    - Joins perf.Player to manual.Player_Clean (fallback to manual.Player)
     """
     df = perf_df.copy()
 
-    # Ensure Player column exists
+    # Ensure Player exists
     if "Player" not in df.columns:
         for cand in ["Name", "FBRef_Name", "player"]:
             if cand in df.columns:
                 df = df.rename(columns={cand: "Player"})
                 break
+    if "Player" not in df.columns:
+        st.error("Performance dataset lacks a Player column after normalization.")
+        st.stop()
+
+    # Manual schema validation
+    validate_manual_schema(manual_df)
+
+    # Normalize seasons for UI (manual stays in dash format internally)
+    manual = manual_df.copy()
+    manual["Season_UI"] = manual["Season"].apply(_season_dash_to_slash)
+
+    # Filter by season (UI provides '2024/25', '2025/26', or 'ALL')
+    if season_choice_ui != "ALL":
+        manual = manual[manual["Season_UI"] == season_choice_ui]
+
+    # Map wage columns to the app's expected names (no guessing)
+    manual = manual.rename(columns={
+        "Gross_PW_EUR": "Weekly_Gross_EUR",
+        "Gross_PY_EUR": "Yearly_Gross_EUR"
+    })
+
+    # Build join keys: perf on Player; manual on Player_Clean (fallback Player)
     df["join_key"] = df["Player"].apply(_normalize_name)
+    manual_key_col = "Player_Clean" if "Player_Clean" in manual.columns else "Player"
+    manual["join_key"] = manual[manual_key_col].apply(_normalize_name)
 
-    m = normalize_manual_wages(manual_df)
-    manual_name_col = None
-    for cand in ["Player", "Name", "player_name", "Player_Name"]:
-        if cand in m.columns:
-            manual_name_col = cand; break
-    if manual_name_col is None:
-        obj_cols = m.select_dtypes(include="object").columns.tolist()
-        manual_name_col = obj_cols[0] if obj_cols else None
-    if manual_name_col is None:
-        st.error("Manual wage file has no usable player-name column.")
-        st.stop()
+    # Deduplicate manual on (join_key, Season_UI) preferring non-null wages
+    manual = (manual.sort_values(by=["Weekly_Gross_EUR","Yearly_Gross_EUR"], ascending=False)
+                    .groupby(["join_key","Season_UI"], as_index=False)
+                    .agg({
+                        manual_key_col: "first",
+                        "Weekly_Gross_EUR": "first",
+                        "Yearly_Gross_EUR": "first",
+                        "Position": "first"
+                    }))
 
-    # Normalize seasons
-    if "Season" in m.columns:
-        m["Season_norm"] = m["Season"].apply(_normalize_season)
-    else:
-        m["Season_norm"] = "ALL"
-    season_label_norm = _normalize_season(season_label)
-
-    m["join_key"] = m[manual_name_col].apply(_normalize_name)
-
-    # Deduplicate by (join_key, Season_norm) prioritizing non-null wages
-    sort_cols = [c for c in ["Weekly_Gross_EUR", "Yearly_Gross_EUR"] if c in m.columns]
-    if sort_cols:
-        m = m.sort_values(by=sort_cols, ascending=False)
-    m = (m.groupby(["join_key", "Season_norm"], as_index=False)
-           .agg({
-               manual_name_col: "first",
-               "Weekly_Gross_EUR": "first" if "Weekly_Gross_EUR" in m.columns else (lambda x: np.nan),
-               "Yearly_Gross_EUR": "first" if "Yearly_Gross_EUR" in m.columns else (lambda x: np.nan),
-               "Position": "first" if "Position" in m.columns else (lambda x: np.nan)
-           }))
-
-    # Filter season
-    if season_label_norm != "ALL":
-        m = m[m["Season_norm"] == season_label_norm]
-
-    # Guard: ensure wage cols exist or we stop early with helpful message
-    wage_cols = [c for c in ["Weekly_Gross_EUR", "Yearly_Gross_EUR"] if c in m.columns]
-    if not wage_cols:
-        st.error("Manual wage file lacks 'Weekly_Gross_EUR'/'Yearly_Gross_EUR' after normalization.")
-        st.stop()
-
-    # Merge manual wages first
-    df = df.merge(m[["join_key"] + wage_cols], on="join_key", how="left", validate="m:1")
-
-    # Optional fallback to scraped Capology for missing salaries
-    if enable_fallback_to_scraped and isinstance(scraped_df, pd.DataFrame) and not scraped_df.empty:
-        s = scraped_df.copy()
-        scraped_name_col = None
-        for cand in ["Player", "Name", "player_name"]:
-            if cand in s.columns:
-                scraped_name_col = cand; break
-        if scraped_name_col is None and len(s.select_dtypes(include="object").columns) > 0:
-            scraped_name_col = s.select_dtypes(include="object").columns[0]
-        if scraped_name_col is not None:
-            s["join_key"] = s[scraped_name_col].apply(_normalize_name)
-            if "Season" in s.columns:
-                s["Season_norm"] = s["Season"].apply(_normalize_season)
-                if season_label_norm != "ALL":
-                    s = s[s["Season_norm"] == season_label_norm]
-            s["Weekly_Fallback"] = np.nan
-            s["Yearly_Fallback"] = np.nan
-            for cand in ["Weekly_Gross_EUR", "Weekly EUR", "Weekly"]:
-                if cand in s.columns: s["Weekly_Fallback"] = s[cand].apply(_coerce_numeric); break
-            for cand in ["Yearly_Gross_EUR", "Annual", "Yearly EUR", "Yearly"]:
-                if cand in s.columns: s["Yearly_Fallback"] = s[cand].apply(_coerce_numeric); break
-            s = s.groupby("join_key", as_index=False).agg({"Weekly_Fallback": "max", "Yearly_Fallback": "max"})
-            df = df.merge(s, on="join_key", how="left")
-            if "Weekly_Gross_EUR" in df.columns:
-                df["Weekly_Gross_EUR"] = np.where(df["Weekly_Gross_EUR"].isna(), df["Weekly_Fallback"], df["Weekly_Gross_EUR"])
-            else:
-                df["Weekly_Gross_EUR"] = df["Weekly_Fallback"]
-            if "Yearly_Gross_EUR" in df.columns:
-                df["Yearly_Gross_EUR"] = np.where(df["Yearly_Gross_EUR"].isna(), df["Yearly_Fallback"], df["Yearly_Gross_EUR"])
-            else:
-                df["Yearly_Gross_EUR"] = df["Yearly_Fallback"]
-            df.drop(columns=["Weekly_Fallback", "Yearly_Fallback"], inplace=True, errors="ignore")
+    # Merge wages
+    df = df.merge(
+        manual[["join_key","Weekly_Gross_EUR","Yearly_Gross_EUR"]],
+        on="join_key", how="left", validate="m:1"
+    )
 
     return df
 
@@ -347,7 +261,6 @@ def create_performance_score(df):
     return df
 
 def create_wage_analysis(df):
-    """Create comprehensive wage analysis — robust to missing columns."""
     if "Weekly_Gross_EUR" not in df.columns:
         return "No wage column(s) present"
     wage_data = df.dropna(subset=["Weekly_Gross_EUR"])
@@ -383,21 +296,18 @@ def main():
     # Load
     try:
         with st.spinner("Loading squad data..."):
-            (como_agecurve, fbref_2425, fbref_2526,
-             transfermarkt, capology_scraped, capology_manual) = load_data()
+            como_agecurve, fbref_2425, fbref_2526, transfermarkt, capology_manual = load_data()
     except Exception as e:
         st.error(f"Failed to load data: {e}")
         st.stop()
 
-    # Base performance frame
+    # Performance base
     df_performance = como_agecurve.copy()
     if "Player" not in df_performance.columns:
         for cand in ["Name", "FBRef_Name", "player"]:
             if cand in df_performance.columns:
                 df_performance = df_performance.rename(columns={cand: "Player"})
                 break
-
-    # Minimal columns guard
     if "Player" not in df_performance.columns:
         st.error("Performance dataset lacks a Player column after normalization.")
         st.stop()
@@ -407,19 +317,21 @@ def main():
         df_performance = df_performance[df_performance["Minutes_2425"].fillna(0) >= 90]
     df_performance = create_performance_score(df_performance)
 
-    # Sidebar Controls
+    # Sidebar
     st.sidebar.title("📊 Dashboard Controls")
-    season_choice = st.sidebar.selectbox("Wage Season (capology_manual)", options=["2024/25", "2025/26", "ALL"], index=0)
-    enable_fallback = st.sidebar.toggle("Allow fallback to scraped Capology for missing wages (not recommended)", value=False)
+    # Derive available seasons from manual (convert to UI slash form)
+    seasons_ui = sorted(capology_manual["Season"].astype(str).map(_season_dash_to_slash).unique().tolist())
+    # Ensure we offer a reasonable default order (latest first)
+    seasons_ui = sorted(seasons_ui)[::-1]
+    season_options = seasons_ui if seasons_ui else ["2024/25","2025/26"]
+    season_choice = st.sidebar.selectbox("Wage Season (manual)", options=season_options + ["ALL"], index=0)
 
-    # Build authoritative wage join BEFORE any wage analysis
+    # Join wages (strict, no fuzzy matching)
     try:
-        df_perf_with_wages = build_wage_master(
+        df_perf_with_wages = build_wage_master_strict(
             perf_df=df_performance,
             manual_df=capology_manual,
-            scraped_df=capology_scraped,
-            season_label=season_choice,
-            enable_fallback_to_scraped=enable_fallback
+            season_choice_ui=season_choice
         )
     except Exception as e:
         st.error(f"Error building wage master: {e}")
@@ -447,7 +359,7 @@ def main():
     if selected_position != "All":
         filtered_df = filtered_df[filtered_df["Position_Standard"] == selected_position]
 
-    # Wage analysis (safe)
+    # Wage analysis
     wage_analysis = create_wage_analysis(filtered_df)
 
     # Tabs
@@ -540,15 +452,19 @@ def main():
 
     with tab3:
         st.markdown('<h2 class="section-header">Salary Analysis (Manual Source)</h2>', unsafe_allow_html=True)
-        st.caption("Source: club-curated `Como_Wage_Breakdown_2425_2526_Cleaned.csv`. Scraped Capology is ignored unless fallback is explicitly enabled.")
-
+        st.caption("Source: club-curated manual file. Columns: Gross_PW_EUR (weekly), Gross_PY_EUR (yearly).")
         if isinstance(wage_analysis, str):
             st.warning(f"💰 {wage_analysis}. Check the manual CSV, season filter, or join keys.")
-            # Audit panel for quick debugging
-            with st.expander("Wage Audit"):
+            with st.expander("Wage Audit (first 25 rows)"):
+                cols = [c for c in ["Player","Position_Standard","Weekly_Gross_EUR","Yearly_Gross_EUR"] if c in filtered_df.columns]
+                if cols:
+                    st.dataframe(filtered_df[cols].head(25), use_container_width=True)
+                # Show unmatched: players with no weekly wage
                 if "Weekly_Gross_EUR" in filtered_df.columns:
-                    st.write("Rows with missing Weekly_Gross_EUR:", int(filtered_df["Weekly_Gross_EUR"].isna().sum()))
-                st.dataframe(filtered_df[["Player", "Position_Standard"] + [c for c in ["Weekly_Gross_EUR","Yearly_Gross_EUR"] if c in filtered_df.columns]].head(25))
+                    unmatched = filtered_df[filtered_df["Weekly_Gross_EUR"].isna()][["Player","Position_Standard"]].head(25)
+                    if not unmatched.empty:
+                        st.write("Players without matched wages (top 25):")
+                        st.dataframe(unmatched, use_container_width=True)
         else:
             c1, c2, c3, c4 = st.columns(4)
             with c1: st.metric("Players with Wages", f"{wage_analysis['total_players']}")
@@ -607,21 +523,24 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
 
         st.subheader("Key Insights")
-        insights = [
-            f"📊 **Squad Size**: {len(filtered_df)} players analyzed",
-            f"⏱️ **Total Minutes**: {int(filtered_df.get('Minutes_2425', pd.Series(dtype=float)).sum()):,} minutes played",
-            f"🏆 **Top Performer**: {filtered_df.loc[filtered_df['Performance_Score'].idxmax(), 'Player']}" if not filtered_df.empty else "🏆 **Top Performer**: N/A"
-        ]
-        if "Age_numeric" in filtered_df.columns and filtered_df["Age_numeric"].notna().any():
-            insights.insert(1, f"🎂 **Average Age**: {filtered_df['Age_numeric'].mean():.1f} years")
-            youngest = filtered_df.loc[filtered_df["Age_numeric"].idxmin()]
-            oldest = filtered_df.loc[filtered_df["Age_numeric"].idxmax()]
-            insights.extend([
-                f"🌟 **Youngest Player**: {youngest['Player']} ({youngest['Age_numeric']:.1f} years)",
-                f"👴 **Most Experienced**: {oldest['Player']} ({oldest['Age_numeric']:.1f} years)"
-            ])
-        for i in insights:
-            st.markdown(f'<div class="insight-box">{i}</div>', unsafe_allow_html=True)
+        if not filtered_df.empty:
+            insights = [
+                f"📊 **Squad Size**: {len(filtered_df)} players analyzed",
+                f"⏱️ **Total Minutes**: {int(filtered_df.get('Minutes_2425', pd.Series(dtype=float)).sum()):,} minutes played",
+                f"🏆 **Top Performer**: {filtered_df.loc[filtered_df['Performance_Score'].idxmax(), 'Player']}"
+            ]
+            if "Age_numeric" in filtered_df.columns and filtered_df["Age_numeric"].notna().any():
+                insights.insert(1, f"🎂 **Average Age**: {filtered_df['Age_numeric'].mean():.1f} years")
+                youngest = filtered_df.loc[filtered_df["Age_numeric"].idxmin()]
+                oldest = filtered_df.loc[filtered_df["Age_numeric"].idxmax()]
+                insights.extend([
+                    f"🌟 **Youngest Player**: {youngest['Player']} ({youngest['Age_numeric']:.1f} years)",
+                    f"👴 **Most Experienced**: {oldest['Player']} ({oldest['Age_numeric']:.1f} years)"
+                ])
+            for i in insights:
+                st.markdown(f'<div class="insight-box">{i}</div>', unsafe_allow_html=True)
+        else:
+            st.info("No players left after filters.")
 
     with tab5:
         st.markdown('<h2 class="section-header">Strategic Recommendations</h2>', unsafe_allow_html=True)
@@ -690,10 +609,8 @@ def main():
 # Entrypoint
 # ----------------------------------------------------------------------
 if __name__ == "__main__":
-    # Avoid import-time crashes; run everything inside main()
     try:
         main()
     except Exception as e:
-        # Render a friendly error rather than crashing Streamlit's health check
         st.error(f"Unhandled error: {e}")
         st.stop()
