@@ -186,14 +186,9 @@ def validate_manual_schema(df: pd.DataFrame):
 def build_wage_master_strict(perf_df: pd.DataFrame,
                              manual_df: pd.DataFrame,
                              season_ui: str) -> pd.DataFrame:
-    """
-    - Map Gross_PW_EUR -> Weekly_Gross_EUR; Gross_PY_EUR -> Yearly_Gross_EUR
-    - Filter by Season (UI uses 'YYYY/YY', manual uses 'YYYY-YY')
-    - Join perf.Player <-> manual.Player_Clean (fallback to manual.Player)
-    """
     df = perf_df.copy()
 
-    # Ensure Player exists in performance DF
+    # Ensure Player exists
     if "Player" not in df.columns:
         for cand in ["Name", "FBRef_Name", "player"]:
             if cand in df.columns:
@@ -203,43 +198,72 @@ def build_wage_master_strict(perf_df: pd.DataFrame,
         st.error("Performance dataset lacks a 'Player' column after normalization.")
         st.stop()
 
-    # Validate and prep manual
-    validate_manual_schema(manual_df)
+    # --- normalize manual headers & validate
     manual = manual_df.copy()
+    manual.columns = [c.strip() for c in manual.columns]  # trim any stray spaces
 
-    # Season filter
+    # hard-validate expected raw headers (but be tolerant to extra spaces originally)
+    required = ["Player","Player_Clean","Position","Age","Country","Gross_PW_EUR","Gross_PY_EUR","Season"]
+    missing = [c for c in required if c not in manual.columns]
+    if missing:
+        st.error(f"Manual wage file missing required columns: {missing}")
+        st.stop()
+
+    # --- season filter (manual uses 'YYYY-YY', UI uses 'YYYY/YY')
     if season_ui != "ALL":
-        season_dash = _season_slash_to_dash(season_ui)  # '2024/25' -> '2024-25'
-        manual = manual[manual["Season"] == season_dash]
+        season_dash = season_ui.replace("/", "-")
+        manual = manual[manual["Season"].astype(str) == season_dash]
 
-    # Map wages to expected columns
+    # --- rename to expected app columns, and GUARANTEE they exist
     manual = manual.rename(columns={
         "Gross_PW_EUR": "Weekly_Gross_EUR",
         "Gross_PY_EUR": "Yearly_Gross_EUR"
     })
+    for col in ["Weekly_Gross_EUR", "Yearly_Gross_EUR"]:
+        if col not in manual.columns:
+            manual[col] = np.nan
 
-    # Build join keys
+    # --- coerce numeric (handles "€", commas, etc.)
+    def _to_num(x):
+        if pd.isna(x): return np.nan
+        s = str(x).replace("€","").replace(",","").strip()
+        try: return float(s)
+        except: return np.nan
+    manual["Weekly_Gross_EUR"] = manual["Weekly_Gross_EUR"].apply(_to_num)
+    manual["Yearly_Gross_EUR"] = manual["Yearly_Gross_EUR"].apply(_to_num)
+
+    # --- build join keys
     df["join_key"] = df["Player"].apply(_normalize_name)
-    manual_key_col = "Player_Clean" if "Player_Clean" in manual.columns else "Player"
-    manual["join_key"] = manual[manual_key_col].apply(_normalize_name)
+    key_col = "Player_Clean" if "Player_Clean" in manual.columns else "Player"
+    manual["join_key"] = manual[key_col].apply(_normalize_name)
 
-    # Deduplicate manual per (join_key, Season), prefer non-null/high wages
-    manual = (manual.sort_values(by=["Weekly_Gross_EUR","Yearly_Gross_EUR"], ascending=False)
-                    .groupby(["join_key","Season"], as_index=False)
-                    .agg({
-                        manual_key_col: "first",
-                        "Weekly_Gross_EUR": "first",
-                        "Yearly_Gross_EUR": "first",
-                        "Position": "first"
-                    }))
+    # --- dedupe per (join_key, Season) preferring non-null
+    if not manual.empty:
+        manual = (manual.sort_values(by=["Weekly_Gross_EUR","Yearly_Gross_EUR"], ascending=False)
+                        .groupby(["join_key","Season"], as_index=False)
+                        .agg({
+                            key_col: "first",
+                            "Weekly_Gross_EUR": "first",
+                            "Yearly_Gross_EUR": "first",
+                            "Position": "first"
+                        }))
+    else:
+        # keep the schema even if season wiped rows
+        manual = manual[["join_key","Weekly_Gross_EUR","Yearly_Gross_EUR"]]
 
-    # Merge wages (authoritative)
+    # --- final merge ALWAYS carries the two wage cols
     df = df.merge(
-        manual[["join_key", "Weekly_Gross_EUR", "Yearly_Gross_EUR"]],
+        manual[["join_key","Weekly_Gross_EUR","Yearly_Gross_EUR"]],
         on="join_key", how="left", validate="m:1"
     )
 
+    # belt-and-suspenders: if merge-side somehow missing, create them
+    for col in ["Weekly_Gross_EUR", "Yearly_Gross_EUR"]:
+        if col not in df.columns:
+            df[col] = np.nan
+
     return df
+
 
 # ----------------------------------------------------------------------
 # Scoring & Analysis
@@ -466,6 +490,12 @@ def main():
     with tab3:
         st.markdown('<h2 class="section-header">Salary Analysis (Manual Source)</h2>', unsafe_allow_html=True)
         st.caption("Source: club-curated `Como_Wage_Breakdown_2425_2526_Cleaned.csv`. Scraped Capology is ignored.")
+        # Quick probe so you can see exactly what Tab 3 is reading
+        with st.expander("🔎 Wage Columns Probe", expanded=False):
+            st.write("Has Weekly_Gross_EUR:", "Weekly_Gross_EUR" in filtered_df.columns)
+            st.write("Has Yearly_Gross_EUR:", "Yearly_Gross_EUR" in filtered_df.columns)
+            st.write("First 3 column names:", list(filtered_df.columns[:3]))
+            st.write("Filtered rows:", len(filtered_df))
         if isinstance(wage_analysis, str):
             st.warning(f"💰 {wage_analysis}. Check the manual CSV, season filter, or join keys.")
             with st.expander("Wage Audit"):
